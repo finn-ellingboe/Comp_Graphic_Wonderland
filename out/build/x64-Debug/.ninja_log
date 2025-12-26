@@ -1,0 +1,23 @@
+# ninja log v5
+28	442	7870902294660201	external/glad-3.3/CMakeFiles/glad.dir/src/gl.c.obj	ad842612d4566f12
+39	365	7870893146403804	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/window.c.obj	9aa65e39d5e482f7
+442	745	7870902294660201	glad.dll	cd51e830392e08de
+34	366	7870893146413822	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/monitor.c.obj	17a87d494bafce5a
+28	366	7870893146423801	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/input.c.obj	e4d222749c355a0f
+53	367	7870893146423801	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/win32_monitor.c.obj	ccad5899352874e8
+46	367	7870893146453801	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/win32_init.c.obj	60adeb2b69a26b51
+22	369	7870893146483807	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/init.c.obj	3858263491ce8741
+18	368	7870893146463833	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/context.c.obj	5843232f98826e47
+58	378	7870893146583824	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/win32_time.c.obj	4d8e1922d6cc6306
+442	745	7870902294660201	glad.lib	cd51e830392e08de
+64	414	7870893146953810	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/win32_tls.c.obj	6f14233a7d145695
+76	432	7870893147133950	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/winmm_joystick.c.obj	1dd8d06ea35a3c2f
+447	789	7870893150505074	glfw3dll.lib	8441dab82ff3b943
+863	1018	7870902300043149	wonderland_triangle.exe	92c5a32c2ad4ade0
+70	443	7870893147243917	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/win32_window.c.obj	a789b5106e27cbeb
+83	447	7870893147289178	external/glfw-3.1.2/src/CMakeFiles/glfw.dir/wgl_context.c.obj	ab2d242cb7e660ac
+489	665	7870910261373531	wonderland_window.exe	4410af9e280815e2
+4	488	7870910259972802	CMakeFiles/wonderland_window.dir/wonderland/wonderland_window.cpp.obj	b8a6fa8c224de055
+19	862	7870902298847668	CMakeFiles/wonderland_triangle.dir/wonderland/wonderland_triangle.cpp.obj	176c2f548d502682
+447	789	7870893150505074	glfw3.dll	8441dab82ff3b943
+13	803	7870902298271486	CMakeFiles/wonderland_window.dir/wonderland/render/shader.cpp.obj	2f0585da48c79a6
