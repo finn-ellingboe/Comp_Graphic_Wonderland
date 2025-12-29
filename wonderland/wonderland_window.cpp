@@ -24,13 +24,22 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 static void cursor_callback(GLFWwindow* window, double xpos, double ypos);
 
 // OpenGL camera view parameters
-static glm::vec3 eye_center(150.0f, 150.0f, 150.0f);
-static glm::vec3 lookat(150.0f, 150.0f, -150.0f);	// start looking at back wall
-static glm::vec3 up(0.0f, 1.0f, 0.0f);
+static glm::vec3 cameraPosition(150.0f, 150.0f, 150.0f);
+static glm::vec3 cameraLookVector(0, 0, -1.0f);	// start looking at back wall
+static glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
 static float FoV = 45.0f;
 static float zNear = 0.1f;
-static float zFar = 1500.0f;
+static float zFar = 3500.0f;
 
+// initialising variables for mouse camera controls
+double yaw = -90.0f;	// has to start at -90.0 degrees so doesnt start pointing right
+double pitch = 0.0f;
+double previousX = windowWidth / 2.0;
+double previousY = windowHeight / 2.0;
+
+// Getting time differences between frames - allows for smoove movement
+float deltaTime = 0.0f;	// time between this frame and the previous frame
+float previousFrame = 0.0f;	// time of the last frame
 
 // Lighting control 
 const glm::vec3 wave500(0.0f, 255.0f, 146.0f);
@@ -456,7 +465,8 @@ struct CornellBox {
 	}
 };
 
-
+// ------------------------------------------------------
+// ------------------------------------------------------
 
 int main(void)
 {
@@ -487,6 +497,7 @@ int main(void)
 	glfwSetKeyCallback(window, key_callback);
 
 	glfwSetCursorPosCallback(window, cursor_callback);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); // capture our mouse so it stays centred in our frame
 
 	// Load OpenGL functions, gladLoadGL returns the loaded version, 0 on error.
 	int version = gladLoadGL(glfwGetProcAddress);
@@ -647,7 +658,7 @@ int main(void)
 
 
 	Skybox skybox;
-	skybox.initialize(glm::vec3(500, 500, 500));  // Scale x,y,z
+	skybox.initialize(glm::vec3(1000, 1000, 1000));  // Scale x,y,z
 
 
 	CornellBox tallBox, smallBox;
@@ -660,11 +671,20 @@ int main(void)
 	glm::mat4 viewMatrix, projectionMatrix;
 	projectionMatrix = glm::perspective(glm::radians(FoV), (float)windowWidth / windowHeight, zNear, zFar);
 
+	// -----------------------------------------------------------
+	// -----------------------------------------------------------
+
 	do
 	{
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-		viewMatrix = glm::lookAt(eye_center, lookat, up);
+		// Getting timing for frames
+		float currentFrame = static_cast<float>(glfwGetTime());
+		deltaTime = currentFrame - previousFrame;
+		previousFrame = currentFrame;
+
+		// lookAt( where camera is, where its looking at relative to where it is, its up )
+		viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraLookVector, cameraUp);
 		glm::mat4 vp = projectionMatrix * viewMatrix;
 
 		skybox.render(vp);
@@ -696,56 +716,59 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 {
 	if (key == GLFW_KEY_R && action == GLFW_PRESS)
 	{
-		eye_center = glm::vec3(150.0f, 150.0f, 150.0f);
-		lookat = glm::vec3(150.0f, 150.0f, -150.0f);
-
+		cameraPosition = glm::vec3(150.0f, 150.0f, 150.0f);
+		cameraLookVector = glm::vec3(0.0f, 0.0f, -1.0f);
 	}
 
-	// change where the skybox is centred relative to the person
+	// number is arbitrarily chosen, replace with what seems fitting
+	// DIdnt think It would have to be one so large
+	float cameraSpeed = static_cast<float>(30000 * deltaTime);
 
 	if (key == GLFW_KEY_W && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		eye_center.z -= 20.0f;
-		// skybox.x -= 20.0f    // Need to make skybox variables global
+		//	Move the camera in the direction we are looking
+		cameraPosition += cameraSpeed * cameraLookVector;
 	}
 
 	if (key == GLFW_KEY_A && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		eye_center.x -= 20.0f;
-		lookat.x -= 20.0f;
+		// Move right relative to where we are looking
+		cameraPosition -= glm::normalize(glm::cross(cameraLookVector, cameraUp)) * cameraSpeed;
 	}
 
 	if (key == GLFW_KEY_S && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		eye_center.z += 20.0f;
+		// Move backwards
+		cameraPosition -= cameraSpeed * cameraLookVector;
 	}
 
 	if (key == GLFW_KEY_D && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		eye_center.x += 20.0f;
-		lookat.x += 20.0f;
+		// Left relative to where looking
+		cameraPosition += glm::normalize(glm::cross(cameraLookVector, cameraUp)) * cameraSpeed;
 	}
 
-
+	/*
 	if (key == GLFW_KEY_UP && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		lookat.y += 20.0f;
+		cameraLookVector.y += 20.0f;
 	}
 
 	if (key == GLFW_KEY_DOWN && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		lookat.y -= 20.0f;
+		cameraLookVector.y -= 20.0f;
 	}
 
 	if (key == GLFW_KEY_LEFT && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		lookat.x -= 20.0f;
+		cameraLookVector.x -= 20.0f;
 	}
 
 	if (key == GLFW_KEY_RIGHT && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
-		lookat.x += 20.0f;
+		cameraLookVector.x += 20.0f;
 	}
+	*/
 
 	/*
 	if (key == GLFW_KEY_SPACE && (action == GLFW_REPEAT || action == GLFW_PRESS))
@@ -759,25 +782,34 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 }
 
 
-static void cursor_callback(GLFWwindow* window, double xpos, double ypos) {
-	/*
-	if (xpos < 0 || xpos >= windowWidth || ypos < 0 || ypos > windowHeight)
-		return;
+static void cursor_callback(GLFWwindow* window, double xPos, double yPos) {
 
-	// Normalize to [0, 1] 
-	float x = xpos / windowWidth;
-	float y = ypos / windowHeight;
+	// getting change in where the mouse is
+	double changeInX = xPos - previousX;
+	double changeInY = previousY - yPos;
+	previousX = xPos;
+	previousY = yPos;
 
-	// To [-1, 1] and flip y up 
-	x = x * 2.0f - 1.0f;
-	y = 1.0f - y * 2.0f;
+	// sensitivity is arbitrarily chosen, replace with what seems fitting
+	double sensitivity = 0.1f;
+	changeInX *= sensitivity;
+	changeInY *= sensitivity;
 
-	const float scale = 250.0f;
-	lightPosition.x = x * scale - 278;
-	lightPosition.y = y * scale + 278;
+	yaw += changeInX;
+	pitch += changeInY;
 
-	//std::cout << lightPosition.x << " " << lightPosition.y << " " << lightPosition.z << std::endl;
-	*/
+	// If pitch goes above/ below 90 it goes negative. Dont want that so clamp it to a value just below
+	if (pitch > 89.0f)
+		pitch = 89.0f;
+	if (pitch < -89.0f)
+		pitch = -89.0f;
+
+	glm::vec3 tempVec(
+		cos(glm::radians(yaw)) * cos(glm::radians(pitch)),
+		sin(glm::radians(pitch)),
+		sin(glm::radians(yaw)) * cos(glm::radians(pitch))
+	);
+	cameraLookVector = glm::normalize(tempVec);
 }
 
 
