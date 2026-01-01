@@ -29,7 +29,7 @@ static glm::vec3 cameraLookVector(0, 0, -1.0f);	// start looking at back wall
 static glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
 static float FoV = 45.0f;
 static float zNear = 0.1f;
-static float zFar = 3500.0f;
+static float zFar = 5000.0f;
 
 // initialising variables for mouse camera controls
 double yaw = -90.0f;	// has to start at -90.0 degrees so doesnt start pointing right
@@ -76,7 +76,8 @@ static GLuint LoadTextureTileBox(const char* texture_file_path) {
 }
 
 struct Skybox {
-	glm::vec3 scale;		// Size of the box in each axis
+	glm::vec3 position;		// Position of the box - should be equal 
+	glm::vec3 scale;		// Size of the skybox in each axis
 
 	GLfloat vertex_buffer_data[72] = {	// Vertex definition for a canonical box
 		// if we swap position of two opposite corners, then rotate 90 degrees to right, it swaps
@@ -226,8 +227,9 @@ struct Skybox {
 	GLuint textureSamplerID;
 	GLuint programID;
 
-	void initialize(glm::vec3 scale) {
+	void initialize(glm::vec3 position, glm::vec3 scale) {
 		// Define scale of the building geometry
+		this->position = position;
 		this->scale = scale;
 
 		// Create a vertex array object
@@ -256,8 +258,8 @@ struct Skybox {
 
 		// Create and compile our GLSL program from the shaders
 		//programID = LoadShadersFromFile("../lab2/box.vert", "../lab2/box.frag");
-		programID = LoadShadersFromFile("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/lab2/lab2/box.vert",
-			"C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/lab2/lab2/box.frag");
+		programID = LoadShadersFromFile("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/skybox.vert",
+			"C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/skybox.frag");
 		if (programID == 0)
 		{
 			std::cerr << "Failed to load shaders." << std::endl;
@@ -267,7 +269,7 @@ struct Skybox {
 		mvpMatrixID = glGetUniformLocation(programID, "MVP");
 
 		// Load a texture
-		textureID = LoadTextureTileBox("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/lab2/lab2/studio_garden.png");
+		textureID = LoadTextureTileBox("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/Skybox_1.png");
 
 		// Get a handle to texture sampler 
 		textureSamplerID = glGetUniformLocation(programID, "textureSampler");
@@ -287,13 +289,12 @@ struct Skybox {
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
 
 		// Model transform 
-		// -----------------------
 		glm::mat4 modelMatrix = glm::mat4();
 
+		// Translate the box so it is always centered on the player as they move around
+		modelMatrix = glm::translate(modelMatrix, position);
 		// Scale the box along each axis
-		// TODO : Have the skybox move with the user as they walk around
-		modelMatrix = glm::scale(modelMatrix, scale); // Scale the skybox relative to the global eye position attributes
-		// -----------------------
+		modelMatrix = glm::scale(modelMatrix, scale);
 
 		// Set model-view-projection matrix
 		glm::mat4 mvp = cameraMatrix * modelMatrix;
@@ -658,7 +659,7 @@ int main(void)
 
 
 	Skybox skybox;
-	skybox.initialize(glm::vec3(1000, 1000, 1000));  // Scale x,y,z
+	skybox.initialize(cameraPosition, glm::vec3(1000, 1000, 1000));  // Scale x,y,z
 
 
 	CornellBox tallBox, smallBox;
@@ -687,6 +688,7 @@ int main(void)
 		viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraLookVector, cameraUp);
 		glm::mat4 vp = projectionMatrix * viewMatrix;
 
+		skybox.position = cameraPosition;
 		skybox.render(vp);
 
 		tallBox.render(vp);
@@ -811,6 +813,3 @@ static void cursor_callback(GLFWwindow* window, double xPos, double yPos) {
 	);
 	cameraLookVector = glm::normalize(tempVec);
 }
-
-
-//  For infinite scrollablility just have the skybox be centered on wherever the person is
