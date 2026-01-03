@@ -26,7 +26,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 static void cursor_callback(GLFWwindow* window, double xpos, double ypos);
 
 // OpenGL camera view parameters
-static glm::vec3 cameraPosition(150.0f, 150.0f, 150.0f);
+static glm::vec3 cameraPosition(0.0f, 75.0f, 0.0f);
 static glm::vec3 cameraLookVector(0, 0, -1.0f);	// start looking at back wall
 static glm::vec3 cameraUp(0.0f, 1.0f, 0.0f);
 static float FoV = 45.0f;
@@ -63,8 +63,8 @@ static GLuint LoadTextureTileBox(const char* texture_file_path, bool flip) {
 	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
 	// To tile textures on a box, we set wrapping to repeat
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); //Changing this to Clamp to Edge because only small gaps in 1 direction
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);// This or Linear
 	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -477,13 +477,13 @@ struct CornellBox {
 
 // Stuff from Heightmap.c
 #define MAX_CIRCLE_SIZE (50.0f)
-#define MAX_DISPLACEMENT (10.0f)
+#define MAX_DISPLACEMENT (5.0f)
 #define DISPLACEMENT_SIGN_LIMIT (0.3f)
-#define MAX_ITER (1000)
+#define MAX_ITER (2000)
 
 /* Map general information */
-#define MAP_SIZE (1000.0f)
-#define MAP_NUM_VERTICES (30)
+#define MAP_SIZE (2000.0f)
+#define MAP_NUM_VERTICES (100)
 #define MAP_NUM_TOTAL_VERTICES (MAP_NUM_VERTICES*MAP_NUM_VERTICES)
 //#define MAP_NUM_LINES (3* (MAP_NUM_VERTICES - 1) * (MAP_NUM_VERTICES - 1) + \
                2 * (MAP_NUM_VERTICES - 1))
@@ -502,7 +502,7 @@ struct Heightmap
 	static constexpr int N = MAP_NUM_VERTICES;
 	static constexpr int TOTAL = MAP_NUM_TOTAL_VERTICES;
 
-	glm::vec3 position = glm::vec3(150.0f, 0.0f, 150.0f);	// The starting camera position but with y = 0
+	glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f);	// The starting camera position but with y = 0
 
 	std::vector<glm::vec3> vertices;
 	std::vector<unsigned int> indices;
@@ -569,8 +569,8 @@ struct Heightmap
 		uvs.resize(TOTAL);
 
 		GLfloat step = MAP_SIZE / (MAP_NUM_VERTICES - 1);
-		GLfloat x = 0.0f;
-		GLfloat z = 0.0f;
+		GLfloat x = -MAP_SIZE / 2;	//0,0 should be its center
+		GLfloat z = -MAP_SIZE / 2;
 		/* Create a flat grid */
 		int k = 0;
 		for (int i = 0; i < MAP_NUM_VERTICES; ++i)
@@ -592,7 +592,7 @@ struct Heightmap
 				++k;
 			}
 			x += step;
-			z = 0.0f;
+			z = -MAP_SIZE / 2;
 		}
 	}
 
@@ -618,8 +618,12 @@ struct Heightmap
 	void updateMap()
 	{
 		/* center of the circle */
+		/*
 		float center_x = (MAP_SIZE * rand()) / RAND_MAX;
 		float center_z = (MAP_SIZE * rand()) / RAND_MAX;
+		*/
+		float center_x = ((float)rand() / RAND_MAX - 0.5f) * MAP_SIZE;
+		float center_z = ((float)rand() / RAND_MAX - 0.5f) * MAP_SIZE;
 		float circle_size = (MAX_CIRCLE_SIZE * rand()) / RAND_MAX;
 		float sign = ((float)rand() / RAND_MAX) < DISPLACEMENT_SIGN_LIMIT ? -1.0f : 1.0f;
 		float disp = (sign * (MAX_DISPLACEMENT * rand())) / RAND_MAX;
@@ -630,10 +634,10 @@ struct Heightmap
 		{
 			GLfloat dx = center_x - v.x;	// x distance
 			GLfloat dz = center_z - v.z;	// y distance from 
-			GLfloat pd = (2.0f * sqrt((dx * dx) + (dz * dz))) / circle_size; // it recommends removing the 2 *
+			GLfloat pd = (sqrt((dx * dx) + (dz * dz))) / circle_size; // it recommends removing the 2 *
 			if (fabs(pd) <= 1.0f)
 			{
-				v.y += disp * cos(pd * glm::pi<float>());
+				v.y += disp * cos(pd*pd * glm::pi<float>());
 			}
 		}
 
@@ -670,6 +674,20 @@ struct Heightmap
 		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
 
 
+		// This is for scrolling textures
+		glUniform3fv(
+			glGetUniformLocation(programID, "cameraPos"),
+			1,
+			&cameraPosition[0]
+		);
+
+		glUniform1f(
+			glGetUniformLocation(programID, "groundSize"),
+			50.0f   // adjust to taste
+		);
+
+
+
 		// Set textureSampler to use texture unit 0
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, textureID);
@@ -683,6 +701,7 @@ struct Heightmap
 
 		//Another add in to match
 		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
 	}
 
 	// A function so the ground's y position doesnt change
