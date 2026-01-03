@@ -1,3 +1,5 @@
+//    my directory is C:\Users\finn_\Desktop\College_Programming\Computer_Graphics\wonderland\out\build\x64-Debug\wonderland_window.exe
+
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -39,7 +41,7 @@ double previousY = windowHeight / 2.0;
 
 // Getting time differences between frames - allows for smoove movement
 float deltaTime = 0.0f;	// time between this frame and the previous frame
-float previousFrame = 0.0f;	// time of the last frame
+float previousTime = 0.0f;	// time of the last frame
 
 // Lighting control 
 const glm::vec3 wave500(0.0f, 255.0f, 146.0f);
@@ -49,22 +51,28 @@ static glm::vec3 lightIntensity = 5.0f * (8.0f * wave500 + 15.6f * wave600 + 18.
 static glm::vec3 lightPosition(-275.0f, 500.0f, -275.0f);
 
 // function for loading textures
-static GLuint LoadTextureTileBox(const char* texture_file_path) {
+static GLuint LoadTextureTileBox(const char* texture_file_path, bool flip) {
 	int w, h, channels;
-	stbi_set_flip_vertically_on_load(true); // This flips our texture along its x axis. This means reversing the image for the skybox is not flipped
+	stbi_set_flip_vertically_on_load(flip); // This flips our texture along its x axis. Whether or not to flip is decide by parameter flip
 	uint8_t* img = stbi_load(texture_file_path, &w, &h, &channels, 3);
+
 	GLuint texture;
 	glGenTextures(1, &texture);
 	glBindTexture(GL_TEXTURE_2D, texture);
+
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
 	// To tile textures on a box, we set wrapping to repeat
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); //Changing this to Clamp to Edge because only small gaps in 1 direction
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);// This or Linear
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	//glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	if (img) {
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, img);
+		/////////TEST
+		int testVariable = 1;    // This line is throwing the excepttion
 		glGenerateMipmap(GL_TEXTURE_2D);
 	}
 	else {
@@ -258,8 +266,8 @@ struct Skybox {
 
 		// Create and compile our GLSL program from the shaders
 		//programID = LoadShadersFromFile("../lab2/box.vert", "../lab2/box.frag");
-		programID = LoadShadersFromFile("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/skybox.vert",
-			"C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/skybox.frag");
+		programID = LoadShadersFromFile("../../../wonderland/Skybox_Files/skybox.vert",
+			"../../../wonderland/Skybox_Files/skybox.frag");
 		if (programID == 0)
 		{
 			std::cerr << "Failed to load shaders." << std::endl;
@@ -269,7 +277,7 @@ struct Skybox {
 		mvpMatrixID = glGetUniformLocation(programID, "MVP");
 
 		// Load a texture
-		textureID = LoadTextureTileBox("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/Skybox_Files/Skybox_1.png");
+		textureID = LoadTextureTileBox("../../../wonderland/Skybox_Files/Skybox_1.png", true);
 
 		// Get a handle to texture sampler 
 		textureSamplerID = glGetUniformLocation(programID, "textureSampler");
@@ -406,7 +414,7 @@ struct CornellBox {
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(index_buffer_data), index_buffer_data, GL_STATIC_DRAW);
 
 		// Create and compile our GLSL program from the shaders
-		programID = LoadShadersFromFile("C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/wonderland_window.vert", "C:/Users/finn_/Desktop/College_Programming/Computer_Graphics/wonderland/wonderland/wonderland_window.frag");
+		programID = LoadShadersFromFile("../../../wonderland/wonderland_window.vert", "../../../wonderland/wonderland_window.frag");
 		if (programID == 0)
 		{
 			std::cerr << "Failed to load shaders." << std::endl;
@@ -466,6 +474,237 @@ struct CornellBox {
 	}
 };
 
+
+// Stuff from Heightmap.c
+#define MAX_CIRCLE_SIZE (50.0f)
+#define MAX_DISPLACEMENT (10.0f)
+#define DISPLACEMENT_SIGN_LIMIT (0.3f)
+#define MAX_ITER (1000)
+
+/* Map general information */
+#define MAP_SIZE (1000.0f)
+#define MAP_NUM_VERTICES (30)
+#define MAP_NUM_TOTAL_VERTICES (MAP_NUM_VERTICES*MAP_NUM_VERTICES)
+//#define MAP_NUM_LINES (3* (MAP_NUM_VERTICES - 1) * (MAP_NUM_VERTICES - 1) + \
+               2 * (MAP_NUM_VERTICES - 1))
+
+/**********************************************************************
+ * Heightmap vertex and index data
+ *********************************************************************/
+/*
+static GLfloat map_vertices[3][MAP_NUM_TOTAL_VERTICES];
+static GLuint  map_line_indices[2 * MAP_NUM_LINES];
+*/
+
+
+struct Heightmap
+{
+	static constexpr int N = MAP_NUM_VERTICES;
+	static constexpr int TOTAL = MAP_NUM_TOTAL_VERTICES;
+
+	glm::vec3 position = glm::vec3(150.0f, 0.0f, 150.0f);	// The starting camera position but with y = 0
+
+	std::vector<glm::vec3> vertices;
+	std::vector<unsigned int> indices;
+	std::vector<glm::vec2> uvs;
+
+	GLuint vertexArrayID, vertexBufferID, indexBufferID, uvBufferID, textureID;
+	GLuint programID;
+	GLuint mvpMatrixID;
+	GLuint textureSamplerID;
+
+	void initialize()
+	{
+		initialiseMap();
+		generateIndices();
+
+		// Create a vertex array object
+		glGenVertexArrays(1, &vertexArrayID);
+		glBindVertexArray(vertexArrayID);
+
+		// Create a vertex buffer object to store the vertex data	
+		glGenBuffers(1, &vertexBufferID);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_DYNAMIC_DRAW);
+		// Using Dynamic Draw because the map can often change
+
+		glGenBuffers(1, &uvBufferID);
+		glBindBuffer(GL_ARRAY_BUFFER, uvBufferID);
+		glBufferData(GL_ARRAY_BUFFER, uvs.size() * sizeof(glm::vec2), uvs.data(), GL_STATIC_DRAW);
+
+		// Create an index buffer object to store the index data that defines triangle faces
+		glGenBuffers(1, &indexBufferID);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(), GL_STATIC_DRAW);
+
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(glm::vec3), (void*)0);
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(glm::vec2), (void*)0);
+
+		programID = LoadShadersFromFile(
+			"../../../wonderland/heightmap.vert",
+			"../../../wonderland/heightmap.frag"
+		);
+
+		if (programID == 0)
+		{
+			std::cerr << "Failed to load shaders." << std::endl;
+		}
+
+		mvpMatrixID = glGetUniformLocation(programID, "MVP");
+
+		//Loading the texture
+		textureID = LoadTextureTileBox("../../../wonderland/Ground_Textures/IMGP1394.jpg", false);
+
+		// Get a handle to texture sampler 
+		textureSamplerID = glGetUniformLocation(programID, "terrainTextureSampler");
+	}
+
+	/* Generate vertices and indices for the heightmap
+ */
+	void initialiseMap()
+	{
+		vertices.resize(TOTAL);
+		uvs.resize(TOTAL);
+
+		GLfloat step = MAP_SIZE / (MAP_NUM_VERTICES - 1);
+		GLfloat x = 0.0f;
+		GLfloat z = 0.0f;
+		/* Create a flat grid */
+		int k = 0;
+		for (int i = 0; i < MAP_NUM_VERTICES; ++i)
+		{
+			for (int j = 0; j < MAP_NUM_VERTICES; ++j)
+			{
+				vertices[k] = glm::vec3(
+					x,
+					0.0f,
+					z
+				);
+				z += step;
+
+				// setting up the uv
+				float u = (float)i / (MAP_NUM_VERTICES - 1);
+				float v = (float)j / (MAP_NUM_VERTICES - 1); // Doing 1 - ... because the texture is flipped on load and upside down otherwise
+				uvs[k] = glm::vec2(u, 1.0 - v);
+
+				++k;
+			}
+			x += step;
+			z = 0.0f;
+		}
+	}
+
+	void generateIndices()
+	{
+		for (int x = 0; x < N - 1; ++x)
+		{
+			for (int z = 0; z < N - 1; ++z)
+			{
+				int i = x * N + z;
+
+				indices.push_back(i);
+				indices.push_back(i + 1);
+				indices.push_back(i + N);
+
+				indices.push_back(i + 1);
+				indices.push_back(i + N + 1);
+				indices.push_back(i + N);
+			}
+		}
+	}
+
+	void updateMap()
+	{
+		/* center of the circle */
+		float center_x = (MAP_SIZE * rand()) / RAND_MAX;
+		float center_z = (MAP_SIZE * rand()) / RAND_MAX;
+		float circle_size = (MAX_CIRCLE_SIZE * rand()) / RAND_MAX;
+		float sign = ((float)rand() / RAND_MAX) < DISPLACEMENT_SIGN_LIMIT ? -1.0f : 1.0f;
+		float disp = (sign * (MAX_DISPLACEMENT * rand())) / RAND_MAX;
+
+		//disp = disp / 2.0f;   -  Removing this
+
+		for (auto& v : vertices) // For all vertices
+		{
+			GLfloat dx = center_x - v.x;	// x distance
+			GLfloat dz = center_z - v.z;	// y distance from 
+			GLfloat pd = (2.0f * sqrt((dx * dx) + (dz * dz))) / circle_size; // it recommends removing the 2 *
+			if (fabs(pd) <= 1.0f)
+			{
+				v.y += disp * cos(pd * glm::pi<float>());
+			}
+		}
+
+		// Upload new heights to GPU
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(glm::vec3), vertices.data());
+	}
+
+	void render(glm::mat4 cameraMatrix)
+	{
+		glUseProgram(programID);
+
+		glBindVertexArray(vertexArrayID); // not sure if this is needed
+
+		// Adding these in to match previou stuff
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		
+		glEnableVertexAttribArray(1);	// Think thi needs to change to 1 - but some other stuff also needs to change
+		glBindBuffer(GL_ARRAY_BUFFER, uvBufferID);
+		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, 0);
+		
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+		
+		// TODO: make the size the same as the skybox, and center it on the player
+		glm::mat4 modelMatrix = glm::mat4();
+
+		modelMatrix = glm::translate(modelMatrix, position); //  Have to make this Y not change
+
+		glm::mat4 mvp = cameraMatrix * modelMatrix;
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+
+
+		// Set textureSampler to use texture unit 0
+		glActiveTexture(GL_TEXTURE0);
+		glBindTexture(GL_TEXTURE_2D, textureID);
+		glUniform1i(textureSamplerID, 0);
+
+		glDrawElements(
+			GL_TRIANGLES,
+			indices.size(),
+			GL_UNSIGNED_INT,
+			(void*)0);
+
+		//Another add in to match
+		glDisableVertexAttribArray(0);
+	}
+
+	// A function so the ground's y position doesnt change
+	void updatePosition(glm::vec3 cameraPosition) {
+		cameraPosition.y = 0;
+		position = cameraPosition;
+	}
+
+	void cleanup() {
+		glDeleteBuffers(1, &vertexBufferID);
+		glDeleteBuffers(1, &indexBufferID);
+		glDeleteVertexArrays(1, &vertexArrayID);
+		glDeleteVertexArrays(1, &vertexArrayID);
+		glDeleteProgram(programID);
+	}
+};
+
+
+
+
+
+
 // ------------------------------------------------------
 // ------------------------------------------------------
 
@@ -514,6 +753,8 @@ int main(void)
 
 	glEnable(GL_DEPTH_TEST);
 	glEnable(GL_CULL_FACE);
+
+
 
 
 	GLfloat tallBoxVertexBufferData[60] = {
@@ -663,9 +904,17 @@ int main(void)
 
 
 	CornellBox tallBox, smallBox;
-	//Box tallBox, smallBox;
 	tallBox.initialize(tallBoxVertexBufferData, tallBoxNormalBufferData, otherBoxColorBufferData);
 	smallBox.initialize(smallBoxVertexBufferData, smallBoxNormalBufferData, otherBoxColorBufferData);
+
+	// Setting up the ground
+	Heightmap ground;
+	ground.initialize();
+	//int iterationNum = 0;
+	for (int i = 0; i <= MAX_ITER; i++) {
+		ground.updateMap();
+	}
+
 
 
 	// Camera setup
@@ -680,19 +929,29 @@ int main(void)
 		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 		// Getting timing for frames
-		float currentFrame = static_cast<float>(glfwGetTime());
-		deltaTime = currentFrame - previousFrame;
-		previousFrame = currentFrame;
+		float currentTime = static_cast<float>(glfwGetTime());
+		deltaTime = currentTime - previousTime;
+		previousTime = currentTime;
 
 		// lookAt( where camera is, where its looking at relative to where it is, its up )
 		viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraLookVector, cameraUp);
 		glm::mat4 vp = projectionMatrix * viewMatrix;
+
+		/*
+		if (iterationNum <= MAX_ITER) {
+			ground.updateMap();
+			iterationNum++;
+		}
+		*/
 
 		skybox.position = cameraPosition;
 		skybox.render(vp);
 
 		tallBox.render(vp);
 		smallBox.render(vp);
+
+		ground.updatePosition(cameraPosition);
+		ground.render(vp);
 
 
 		// Swap buffers
@@ -707,6 +966,8 @@ int main(void)
 
 	tallBox.cleanup();
 	smallBox.cleanup();
+
+	ground.cleanup();
 
 	// Close OpenGL window and terminate GLFW
 	glfwTerminate();
