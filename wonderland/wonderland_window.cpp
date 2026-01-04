@@ -1,14 +1,15 @@
-//    my directory is C:\Users\finn_\Desktop\College_Programming\Computer_Graphics\wonderland\out\build\x64-Debug\wonderland_window.exe
-
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/string_cast.hpp>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb/stb_image.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb/stb_image_write.h>
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
 
 #include <render/shader.h>
 
@@ -17,10 +18,19 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
+// For models - we already include files that shouldnt be redefined somewhere so extra checks in place
+#define TINYGLTF_IMPLEMENTATION
+#define TINYGLTF_NOEXCEPTION
+#define TINYGLTF_NO_STB_IMAGE
+#define TINYGLTF_NO_STB_IMAGE_WRITE
+#include "tiny_gltf.h"
+#define BUFFER_OFFSET(i) ((char *)NULL + (i))
+
+
 
 static GLFWwindow* window;
-static int windowWidth = 1024;
-static int windowHeight = 768;
+static int windowWidth = 2048;
+static int windowHeight = 1536;
 
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mode);
 static void cursor_callback(GLFWwindow* window, double xpos, double ypos);
@@ -49,6 +59,18 @@ const glm::vec3 wave600(255.0f, 190.0f, 0.0f);
 const glm::vec3 wave700(205.0f, 0.0f, 0.0f);
 static glm::vec3 lightIntensity = 5.0f * (8.0f * wave500 + 15.6f * wave600 + 18.4f * wave700);
 static glm::vec3 lightPosition(-275.0f, 500.0f, -275.0f);
+
+
+// For heightmap Heightmap.c
+#define MAX_CIRCLE_SIZE (50.0f)
+#define MAX_DISPLACEMENT (5.0f)
+#define DISPLACEMENT_SIGN_LIMIT (0.3f)
+#define MAX_ITER (2000)
+#define MAP_SIZE (2000.0f)
+#define MAP_NUM_VERTICES (100)
+#define MAP_NUM_TOTAL_VERTICES (MAP_NUM_VERTICES*MAP_NUM_VERTICES)
+
+
 
 // function for loading textures
 static GLuint LoadTextureTileBox(const char* texture_file_path, bool flip) {
@@ -286,6 +308,8 @@ struct Skybox {
 	void render(glm::mat4 cameraMatrix) {
 		glUseProgram(programID);
 
+		glBindVertexArray(vertexArrayID); // solves skybox dissapearing when lamp rendered
+
 		glEnableVertexAttribArray(0);
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
@@ -474,29 +498,6 @@ struct CornellBox {
 	}
 };
 
-
-// Stuff from Heightmap.c
-#define MAX_CIRCLE_SIZE (50.0f)
-#define MAX_DISPLACEMENT (5.0f)
-#define DISPLACEMENT_SIGN_LIMIT (0.3f)
-#define MAX_ITER (2000)
-
-/* Map general information */
-#define MAP_SIZE (2000.0f)
-#define MAP_NUM_VERTICES (100)
-#define MAP_NUM_TOTAL_VERTICES (MAP_NUM_VERTICES*MAP_NUM_VERTICES)
-//#define MAP_NUM_LINES (3* (MAP_NUM_VERTICES - 1) * (MAP_NUM_VERTICES - 1) + \
-               2 * (MAP_NUM_VERTICES - 1))
-
-/**********************************************************************
- * Heightmap vertex and index data
- *********************************************************************/
-/*
-static GLfloat map_vertices[3][MAP_NUM_TOTAL_VERTICES];
-static GLuint  map_line_indices[2 * MAP_NUM_LINES];
-*/
-
-
 struct Heightmap
 {
 	static constexpr int N = MAP_NUM_VERTICES;
@@ -586,8 +587,8 @@ struct Heightmap
 
 				// setting up the uv
 				float u = (float)i / (MAP_NUM_VERTICES - 1);
-				float v = (float)j / (MAP_NUM_VERTICES - 1); // Doing 1 - ... because the texture is flipped on load and upside down otherwise
-				uvs[k] = glm::vec2(u, 1.0 - v);
+				float v = (float)j / (MAP_NUM_VERTICES - 1);
+				uvs[k] = glm::vec2(u, v);
 
 				++k;
 			}
@@ -674,20 +675,6 @@ struct Heightmap
 		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
 
 
-		// This is for scrolling textures
-		glUniform3fv(
-			glGetUniformLocation(programID, "cameraPos"),
-			1,
-			&cameraPosition[0]
-		);
-
-		glUniform1f(
-			glGetUniformLocation(programID, "groundSize"),
-			50.0f   // adjust to taste
-		);
-
-
-
 		// Set textureSampler to use texture unit 0
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, textureID);
@@ -714,14 +701,300 @@ struct Heightmap
 		glDeleteBuffers(1, &vertexBufferID);
 		glDeleteBuffers(1, &indexBufferID);
 		glDeleteVertexArrays(1, &vertexArrayID);
-		glDeleteVertexArrays(1, &vertexArrayID);
 		glDeleteProgram(programID);
 	}
 };
 
+struct Lampost {
+	// Shader variable IDs
+	GLuint mvpMatrixID;
+	GLuint lightPositionID;
+	GLuint lightIntensityID;
+	GLuint programID;
+
+	tinygltf::Model model;
+
+	struct PrimitiveObject {
+		GLuint vao;
+		std::map<int, GLuint> vbos;
+	};
+	std::vector<PrimitiveObject> primitiveObjects;
 
 
+	glm::mat4 getNodeTransform(const tinygltf::Node& node) {
+		glm::mat4 transform(1.0f);
 
+		if (node.matrix.size() == 16) {
+			transform = glm::make_mat4(node.matrix.data());
+		}
+		else {
+			if (node.translation.size() == 3)
+				transform = glm::translate(transform, glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
+
+			if (node.rotation.size() == 4) {
+				glm::quat q(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
+				transform *= glm::mat4_cast(q);
+			}
+
+			if (node.scale.size() == 3)
+				transform = glm::scale(transform, glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
+		}
+		return transform;
+	}
+
+
+	bool loadModel(tinygltf::Model& model, const char* filename) {
+		tinygltf::TinyGLTF loader;
+		std::string err;
+		std::string warn;
+
+		bool res = loader.LoadASCIIFromFile(&model, &err, &warn, filename);
+		if (!warn.empty()) {
+			std::cout << "WARN: " << warn << std::endl;
+		}
+
+		if (!err.empty()) {
+			std::cout << "ERR: " << err << std::endl;
+		}
+
+		if (!res)
+			std::cout << "Failed to load glTF: " << filename << std::endl;
+		else
+			std::cout << "Loaded glTF: " << filename << std::endl;
+
+		return res;
+	}
+
+	void initialize() {
+		// Modify your path if needed
+		if (!loadModel(model, "../../../wonderland/Lampost/rusticLamps.gltf")) {
+			return;
+		}
+
+		// Prepare buffers for rendering 
+		primitiveObjects = bindModel(model);
+
+		// Create and compile our GLSL program from the shaders
+		programID = LoadShadersFromFile("../../../wonderland/lampost.vert", "../../../wonderland/lampost.frag");
+		if (programID == 0)
+		{
+			std::cerr << "Failed to load shaders." << std::endl;
+		}
+
+		// Get a handle for GLSL variables
+		mvpMatrixID = glGetUniformLocation(programID, "MVP");
+		lightPositionID = glGetUniformLocation(programID, "lightPosition");
+		lightIntensityID = glGetUniformLocation(programID, "lightIntensity");
+	}
+
+
+	void bindMesh(std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model, tinygltf::Mesh& mesh) {
+
+		std::map<int, GLuint> vbos;
+		for (size_t i = 0; i < model.bufferViews.size(); ++i) {
+			const tinygltf::BufferView& bufferView = model.bufferViews[i];
+
+			int target = bufferView.target;
+
+			if (bufferView.target == 0) {
+				// The bufferView with target == 0 in our model refers to 
+				// the skinning weights, for 25 joints, each 4x4 matrix (16 floats), totaling to 400 floats or 1600 bytes. 
+				// So it is considered safe to skip the warning.
+				//std::cout << "WARN: bufferView.target is zero" << std::endl;
+				continue;
+			}
+
+			const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+			GLuint vbo;
+			glGenBuffers(1, &vbo);
+			glBindBuffer(target, vbo);
+			glBufferData(target, bufferView.byteLength,
+				&buffer.data.at(0) + bufferView.byteOffset, GL_STATIC_DRAW);
+
+			vbos[i] = vbo;
+		}
+
+		// Each mesh can contain several primitives (or parts), each we need to 
+		// bind to an OpenGL vertex array object
+		for (size_t i = 0; i < mesh.primitives.size(); ++i) {
+
+			tinygltf::Primitive primitive = mesh.primitives[i];
+			tinygltf::Accessor indexAccessor = model.accessors[primitive.indices];
+
+			GLuint vao;
+			glGenVertexArrays(1, &vao);
+			glBindVertexArray(vao);
+
+			for (auto& attrib : primitive.attributes) {
+				tinygltf::Accessor accessor = model.accessors[attrib.second];
+				int byteStride =
+					accessor.ByteStride(model.bufferViews[accessor.bufferView]);
+				glBindBuffer(GL_ARRAY_BUFFER, vbos[accessor.bufferView]);
+
+				int size = 1;
+				if (accessor.type != TINYGLTF_TYPE_SCALAR) {
+					size = accessor.type;
+				}
+
+				int vaa = -1;
+				if (attrib.first.compare("POSITION") == 0) vaa = 0;
+				if (attrib.first.compare("NORMAL") == 0) vaa = 1;
+				if (attrib.first.compare("TEXCOORD_0") == 0) vaa = 2;
+				if (attrib.first.compare("JOINTS_0") == 0) vaa = 3;
+				if (attrib.first.compare("WEIGHTS_0") == 0) vaa = 4;
+				if (vaa > -1) {
+					glEnableVertexAttribArray(vaa);
+					glVertexAttribPointer(vaa, size, accessor.componentType,
+						accessor.normalized ? GL_TRUE : GL_FALSE,
+						byteStride, BUFFER_OFFSET(accessor.byteOffset));
+				}
+				else {
+					std::cout << "vaa missing: " << attrib.first << std::endl;
+				}
+			}
+
+			// Record VAO for later use
+			PrimitiveObject primitiveObject;
+			primitiveObject.vao = vao;
+			primitiveObject.vbos = vbos;
+			primitiveObjects.push_back(primitiveObject);
+
+			glBindVertexArray(0);
+		}
+	}
+
+	void bindModelNodes(std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model,
+		tinygltf::Node& node) {
+		// Bind buffers for the current mesh at the node
+		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
+			bindMesh(primitiveObjects, model, model.meshes[node.mesh]);
+		}
+
+		// Recursive into children nodes
+		for (size_t i = 0; i < node.children.size(); i++) {
+			assert((node.children[i] >= 0) && (node.children[i] < model.nodes.size()));
+			bindModelNodes(primitiveObjects, model, model.nodes[node.children[i]]);
+		}
+	}
+
+	std::vector<PrimitiveObject> bindModel(tinygltf::Model& model) {
+		std::vector<PrimitiveObject> primitiveObjects;
+
+		const tinygltf::Scene& scene = model.scenes[model.defaultScene];
+		for (size_t i = 0; i < scene.nodes.size(); ++i) {
+			assert((scene.nodes[i] >= 0) && (scene.nodes[i] < model.nodes.size()));
+			bindModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]]);
+		}
+
+		return primitiveObjects;
+	}
+
+	void drawMesh(const std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model, tinygltf::Mesh& mesh) {
+
+		for (size_t i = 0; i < mesh.primitives.size(); ++i)
+		{
+			GLuint vao = primitiveObjects[i].vao;
+			std::map<int, GLuint> vbos = primitiveObjects[i].vbos;
+
+			glBindVertexArray(vao);
+
+			tinygltf::Primitive primitive = mesh.primitives[i];
+			tinygltf::Accessor indexAccessor = model.accessors[primitive.indices];
+
+			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vbos.at(indexAccessor.bufferView));
+
+			glDrawElements(primitive.mode, indexAccessor.count,
+				indexAccessor.componentType,
+				BUFFER_OFFSET(indexAccessor.byteOffset));
+
+			glBindVertexArray(0);
+		}
+	}
+	/*
+	void drawModelNodes(const std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model, tinygltf::Node& node) {
+		// Draw the mesh at the node, and recursively do so for children nodes
+		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
+			drawMesh(primitiveObjects, model, model.meshes[node.mesh]);
+		}
+		for (size_t i = 0; i < node.children.size(); i++) {
+			drawModelNodes(primitiveObjects, model, model.nodes[node.children[i]]);
+		}
+	}
+	*/
+	void drawModelNodes(const std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model, tinygltf::Node& node, glm::mat4 parentTransform,
+		glm::mat4 cameraMatrix) {
+
+		glm::mat4 localTransform = parentTransform * getNodeTransform(node);
+
+		// Draw the mesh at the node, and recursively do so for children nodes
+		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
+			glm::mat4 mvp = cameraMatrix * localTransform;
+			glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+			drawMesh(primitiveObjects, model, model.meshes[node.mesh]);
+		}
+		for (size_t i = 0; i < node.children.size(); i++) {
+			drawModelNodes(primitiveObjects, model, model.nodes[node.children[i]], localTransform, cameraMatrix);
+		}
+	}
+
+	/*
+	void drawModel(const std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model) {
+		// Draw all nodes
+		const tinygltf::Scene& scene = model.scenes[model.defaultScene];
+		for (size_t i = 0; i < scene.nodes.size(); ++i) {
+			drawModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]]);
+		}
+	}
+	*/
+	void drawModel(const std::vector<PrimitiveObject>& primitiveObjects,
+		tinygltf::Model& model, glm::mat4 cameraMatrix,
+		glm::mat4 worldTransform) {
+		// Draw all nodes
+		const tinygltf::Scene& scene = model.scenes[model.defaultScene];
+
+		for (size_t i = 0; i < scene.nodes.size(); ++i) {
+			drawModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]], worldTransform,
+				cameraMatrix);
+		}
+	}
+
+	void render(glm::mat4 cameraMatrix) {
+		glUseProgram(programID);
+		glEnable(GL_DEPTH_TEST);
+
+		//
+		glm::mat4 modelMatrix = glm::mat4(1.0f);
+		modelMatrix = glm::translate(modelMatrix, glm::vec3(0.0f, 50.0f, -200.0f));
+		modelMatrix = glm::scale(modelMatrix, glm::vec3(200.0f));
+
+		// Set camera
+		/*
+		glm::mat4 mvp = cameraMatrix;
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+		*/
+
+		// setting just a generic color for now
+		glm::vec3 objectColor(1.0f, 0.5f, 0.0f); 
+		glUniform3fv(glGetUniformLocation(programID, "color"), 1, &objectColor[0]);
+
+		// Set light data 
+		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
+		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
+
+		// Draw the GLTF model
+		drawModel(primitiveObjects, model, cameraMatrix, modelMatrix);
+	}
+
+	void cleanup() {
+		glDeleteProgram(programID);
+	}
+};
 
 
 // ------------------------------------------------------
@@ -771,7 +1044,8 @@ int main(void)
 	glClearColor(0.2f, 0.2f, 0.25f, 0.0f);
 
 	glEnable(GL_DEPTH_TEST);
-	glEnable(GL_CULL_FACE);
+	//glEnable(GL_CULL_FACE);
+	glDisable(GL_CULL_FACE);
 
 
 
@@ -934,6 +1208,8 @@ int main(void)
 		ground.updateMap();
 	}
 
+	Lampost lampost;
+	lampost.initialize();
 
 
 	// Camera setup
@@ -956,12 +1232,6 @@ int main(void)
 		viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraLookVector, cameraUp);
 		glm::mat4 vp = projectionMatrix * viewMatrix;
 
-		/*
-		if (iterationNum <= MAX_ITER) {
-			ground.updateMap();
-			iterationNum++;
-		}
-		*/
 
 		skybox.position = cameraPosition;
 		skybox.render(vp);
@@ -972,6 +1242,7 @@ int main(void)
 		ground.updatePosition(cameraPosition);
 		ground.render(vp);
 
+		lampost.render(vp);
 
 		// Swap buffers
 		glfwSwapBuffers(window);
@@ -987,6 +1258,8 @@ int main(void)
 	smallBox.cleanup();
 
 	ground.cleanup();
+
+	lampost.cleanup();
 
 	// Close OpenGL window and terminate GLFW
 	glfwTerminate();
@@ -1004,7 +1277,7 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
 	// number is arbitrarily chosen, replace with what seems fitting
 	// DIdnt think It would have to be one so large
-	float cameraSpeed = static_cast<float>(30000 * deltaTime);
+	float cameraSpeed = static_cast<float>(5000 * deltaTime);
 
 	if (key == GLFW_KEY_W && (action == GLFW_REPEAT || action == GLFW_PRESS))
 	{
@@ -1029,35 +1302,6 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 		// Left relative to where looking
 		cameraPosition += glm::normalize(glm::cross(cameraLookVector, cameraUp)) * cameraSpeed;
 	}
-
-	/*
-	if (key == GLFW_KEY_UP && (action == GLFW_REPEAT || action == GLFW_PRESS))
-	{
-		cameraLookVector.y += 20.0f;
-	}
-
-	if (key == GLFW_KEY_DOWN && (action == GLFW_REPEAT || action == GLFW_PRESS))
-	{
-		cameraLookVector.y -= 20.0f;
-	}
-
-	if (key == GLFW_KEY_LEFT && (action == GLFW_REPEAT || action == GLFW_PRESS))
-	{
-		cameraLookVector.x -= 20.0f;
-	}
-
-	if (key == GLFW_KEY_RIGHT && (action == GLFW_REPEAT || action == GLFW_PRESS))
-	{
-		cameraLookVector.x += 20.0f;
-	}
-	*/
-
-	/*
-	if (key == GLFW_KEY_SPACE && (action == GLFW_REPEAT || action == GLFW_PRESS))
-	{
-		saveDepth = true;
-	}
-	*/
 
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
 		glfwSetWindowShouldClose(window, GL_TRUE);
@@ -1093,3 +1337,13 @@ static void cursor_callback(GLFWwindow* window, double xPos, double yPos) {
 	);
 	cameraLookVector = glm::normalize(tempVec);
 }
+
+
+
+
+/* Files obtained from :
+
+Ground / skybox textures:      https://opengameart.org/
+
+Lampost:   https://www.cgtrader.com/free-3d-models/architectural/lighting/lampposts-with-hanging-lanterns
+*/

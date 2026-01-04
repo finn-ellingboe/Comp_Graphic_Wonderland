@@ -13,6 +13,7 @@ include_directories(
 	external/glfw-3.1.2/include/
 	external/glm-0.9.7.1/
 	external/glad-opengl-3.3/include/
+	external/tinygltf-2.9.3/
 	external/
 	wonderland/
 )
@@ -27,10 +28,11 @@ target_link_libraries(wonderland_window
 	glad
 )
 
-add_executable(wonderland_triangle
-	wonderland/wonderland_triangle.cpp
+add_executable(wonderland_redo
+	wonderland/wonderland_redo.cpp
+	wonderland/render/shader.cpp
 )
-target_link_libraries(wonderland_triangle
+target_link_libraries(wonderland_redo
 	${OPENGL_LIBRARY}
 	glfw
 	glad
