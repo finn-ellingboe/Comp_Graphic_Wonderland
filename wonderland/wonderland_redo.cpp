@@ -3,10 +3,15 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
+//tiny_glth.h already imports these
 //#include <stb/stb_image_write.h>
+//#include <stb/stb_image.h>
+
+
+#define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <tiny_gltf.h>
 
 #include <render/shader.h>
 
@@ -14,6 +19,7 @@
 #include <iostream>
 #define _USE_MATH_DEFINES
 #include <math.h>
+
 
 
 static GLFWwindow* window;
@@ -40,6 +46,56 @@ double previousY = windowHeight / 2.0;
 // Getting time differences between frames - allows for smoove movement
 float deltaTime = 0.0f;	// time between this frame and the previous frame
 float previousFrame = 0.0f;	// time of the last frame
+
+
+// Lighting control 
+const glm::vec3 wave500(0.0f, 255.0f, 146.0f);
+const glm::vec3 wave600(255.0f, 190.0f, 0.0f);
+const glm::vec3 wave700(205.0f, 0.0f, 0.0f);
+static glm::vec3 lightIntensity = 5.0f * (8.0f * wave500 + 15.6f * wave600 + 18.4f * wave700);
+static glm::vec3 lightPosition(150.0f, 500.0f, -150.0f);
+
+// Shadow mapping
+static glm::vec3 lightUp(0, 0, 1);
+static int shadowMapWidth = 2048;
+static int shadowMapHeight = 2048;
+
+static GLuint depthMapFBO;
+static GLuint depthMapTexture;
+static glm::mat4 lightSpaceMatrix; // The single matrix for the light's view
+static GLuint depthProgramID; // Shader for the first pass
+
+// TODO: set these parameters 
+static float depthFoV = 160.f;
+static float depthNear = 0.1f;
+static float depthFar = 8000.f; // Just needs to be bigger than where its cut off by ground
+
+// Helper flag and function to save depth maps for debugging
+static bool saveDepth = true;
+
+
+// This function retrieves and stores the depth map of the default frame buffer 
+// or a particular frame buffer (indicated by FBO ID) to a PNG image.
+static void saveDepthTexture(GLuint fbo, std::string filename) {
+	int width = shadowMapWidth;
+	int height = shadowMapHeight;
+	if (shadowMapWidth == 0 || shadowMapHeight == 0) {
+		width = windowWidth;
+		height = windowHeight;
+	}
+	int channels = 3;
+
+	std::vector<float> depth(width * height);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glReadBuffer(GL_DEPTH_COMPONENT);
+	glReadPixels(0, 0, width, height, GL_DEPTH_COMPONENT, GL_FLOAT, depth.data());
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	std::vector<unsigned char> img(width * height * 3);
+	for (int i = 0; i < width * height; ++i) img[3 * i] = img[3 * i + 1] = img[3 * i + 2] = depth[i] * 255;
+
+	stbi_write_png(filename.c_str(), width, height, channels, img.data(), width * channels);
+}
 
 
 // function for loading textures
@@ -348,6 +404,14 @@ struct Ground
 	GLuint textureSamplerID;
 	GLuint programID;
 
+	// for lighting and shadow mapping
+	GLuint mMatrixID;
+	GLuint lightPositionID;
+	GLuint lightIntensityID;
+	GLuint lightSpaceMatrixID;
+	GLuint shadowMapSamplerID;
+	GLuint farPlaneID;
+
 	GLfloat ground_vertex_buffer_data[12] = {
 	-0.5f, 0.0f, -0.5f,
 	 0.5f, 0.0f, -0.5f,
@@ -400,6 +464,14 @@ struct Ground
 		// Get a handle to texture sampler 
 		textureSamplerID = glGetUniformLocation(programID, "textureSampler");
 
+		// shadow mapping + light
+		mMatrixID = glGetUniformLocation(programID, "M");
+		lightPositionID = glGetUniformLocation(programID, "lightPosition");
+		lightIntensityID = glGetUniformLocation(programID, "lightIntensity");
+		lightSpaceMatrixID = glGetUniformLocation(programID, "lightSpaceMatrix");
+		shadowMapSamplerID = glGetUniformLocation(programID, "shadowMap");
+		farPlaneID = glGetUniformLocation(programID, "farPlane");
+
 		glBindVertexArray(0);
 	}
 
@@ -421,14 +493,26 @@ struct Ground
 
 		glm::mat4 modelMatrix = glm::mat4();
 		modelMatrix = glm::translate(modelMatrix, position);
-		modelMatrix = glm::scale(modelMatrix, glm::vec3(tileSize));
+		modelMatrix = glm::scale(modelMatrix, glm::vec3(tileSize, 1.0f, tileSize));
 
 		glm::mat4 mvp = cameraMatrix * modelMatrix;
 		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+		glUniformMatrix4fv(mMatrixID, 1, GL_FALSE, &modelMatrix[0][0]);
+
+
+		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
+		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
+
+		glUniformMatrix4fv(lightSpaceMatrixID, 1, GL_FALSE, &lightSpaceMatrix[0][0]);
+		glUniform1f(farPlaneID, depthFar);
 
 		glActiveTexture(GL_TEXTURE0);
 		glBindTexture(GL_TEXTURE_2D, textureID);
 		glUniform1i(textureSamplerID, 0);
+
+		glActiveTexture(GL_TEXTURE1);
+		glBindTexture(GL_TEXTURE_2D, depthMapTexture);
+		glUniform1i(shadowMapSamplerID, 1);
 
 		glDrawElements(GL_TRIANGLES,
 			6,
@@ -439,7 +523,331 @@ struct Ground
 		glDisableVertexAttribArray(0);
 		glDisableVertexAttribArray(1);
 	}
+
+	void renderDepth(const glm::mat4& lightSpaceMatrix, float tileSize) {
+		glUseProgram(depthProgramID); 
+		glBindVertexArray(vertexArrayID);
+
+		glm::mat4 modelMatrix = glm::mat4();
+		modelMatrix = glm::translate(modelMatrix, position);
+		modelMatrix = glm::scale(modelMatrix, glm::vec3(tileSize, 1.0f, tileSize));
+
+		/*
+		GLuint mMatrixDepthID = glGetUniformLocation(depthProgramID, "M");
+		glUniformMatrix4fv(mMatrixDepthID, 1, GL_FALSE, &modelMatrix[0][0]);
+
+		GLuint lightPositionDepthID = glGetUniformLocation(depthProgramID, "lightPosition");
+		glUniform3fv(lightPositionDepthID, 1, &lightPosition[0]);
+		*/
+
+		glm::mat4 mvp = lightSpaceMatrix * modelMatrix;
+
+		GLuint mvpDepthID = glGetUniformLocation(depthProgramID, "lightSpaceMatrix");
+		glUniformMatrix4fv(mvpDepthID, 1, GL_FALSE, &mvp[0][0]);
+
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, (void*)0);
+
+		glDisableVertexAttribArray(0);
+	}
+
+	void cleanup()
+	{
+		glDeleteBuffers(1, &vertexBufferID);
+		glDeleteBuffers(1, &uvBufferID);
+		glDeleteBuffers(1, &indexBufferID);
+		glDeleteVertexArrays(1, &vertexArrayID);
+		glDeleteTextures(1, &textureID);
+		glDeleteProgram(programID);
+	}
 };
+
+
+struct Box {
+
+	GLfloat vertexBufferData[60] = {
+		// This doesnt include one of the vertexes  - its fine its not visible
+		-105.75, 82.5, -61.75,
+		-66.25, 82.5, -74.0,
+		-78.5, 82.5, -114.0,
+		-118.0, 82.5, -101.5,
+
+		-105.75, 0.0, -61.75,
+		-105.75, 82.5, -61.75,
+		-118.0, 82.5, -101.5,
+		-118.0, 0.0, -101.5,
+
+		-118.0, 0.0, -101.5,
+		-118.0, 82.5, -101.5,
+		-78.5, 82.5, -114.0,
+		-78.5, 0.0, -114.0,
+
+		-78.5, 0.0, -114.0,
+		-78.5, 82.5, -114.0,
+		-66.25, 82.5, -74.0,
+		-66.25, 0.0, -74.0,
+
+		-66.25, 0.0, -74.0,
+		-66.25, 82.5, -74.0,
+		-105.75, 82.5, -61.75,
+		-105.75, 0.0, -61.75
+	};
+
+	GLfloat normalBufferData[60] = {
+		0.0, 1.0, 0.0,
+		0.0, 1.0, 0.0,
+		0.0, 1.0, 0.0,
+		0.0, 1.0, 0.0,
+
+		0.956, 0.0, 0.295,
+		0.956, 0.0, 0.295,
+		0.956, 0.0, 0.295,
+		0.956, 0.0, 0.295,
+
+		0.302, 0.0, -0.953,
+		0.302, 0.0, -0.953,
+		0.302, 0.0, -0.953,
+		0.302, 0.0, -0.953,
+
+		-0.955, 0.0, -0.293,
+		-0.955, 0.0, -0.293,
+		-0.955, 0.0, -0.293,
+		-0.955, 0.0, -0.293,
+
+		-0.296, 0.0, 0.955,
+		-0.296, 0.0, 0.955,
+		-0.296, 0.0, 0.955,
+		-0.296, 0.0, 0.955,
+	};
+	GLfloat colorBufferData[60] = {
+		// Floor
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+
+		// Ceiling
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+
+		// Left wall
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+
+		// Right wall
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+
+		// Back wall
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f,
+		1.0f, 1.0f, 1.0f
+	};
+
+	// Refer to original Cornell Box data 
+	// from https://www.graphics.cornell.edu/online/box/data.html
+
+	GLuint index_buffer_data[30] = {
+		0, 1, 2,
+		0, 2, 3,
+
+		4, 5, 6,
+		4, 6, 7,
+
+		8, 9, 10,
+		8, 10, 11,
+
+		12, 13, 14,
+		12, 14, 15,
+
+		16, 17, 18,
+		16, 18, 19,
+	};
+
+	// OpenGL buffers
+	GLuint vertexArrayID;
+	GLuint vertexBufferID;
+	GLuint indexBufferID;
+	GLuint colorBufferID;
+	GLuint normalBufferID;
+
+	// Shader variable IDs
+	GLuint mvpMatrixID;
+	GLuint mMatrixID;           // <-- ADDED: Handle for Model Matrix
+	GLuint lightPositionID;
+	GLuint lightIntensityID;
+	GLuint lightSpaceMatrixID;  // <-- ADDED: Handle for Light Space Matrix
+	GLuint shadowMapSamplerID;  // <-- ADDED: Handle for Depth Texture
+	GLuint programID;
+
+	void initialize() {
+
+		// Create a vertex array object
+		glGenVertexArrays(1, &vertexArrayID);
+		glBindVertexArray(vertexArrayID);
+
+		// Create a vertex buffer object to store the vertex data		
+		glGenBuffers(1, &vertexBufferID);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(this->vertexBufferData), this->vertexBufferData, GL_STATIC_DRAW);
+
+		// Create a vertex buffer object to store the color data
+		glGenBuffers(1, &colorBufferID);
+		glBindBuffer(GL_ARRAY_BUFFER, colorBufferID);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(this->colorBufferData), this->colorBufferData, GL_STATIC_DRAW);
+
+		// Create a vertex buffer object to store the vertex normals		
+		glGenBuffers(1, &normalBufferID);
+		glBindBuffer(GL_ARRAY_BUFFER, normalBufferID);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(this->normalBufferData), this->normalBufferData, GL_STATIC_DRAW);
+
+		// Create an index buffer object to store the index data that defines triangle faces
+		glGenBuffers(1, &indexBufferID);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(index_buffer_data), index_buffer_data, GL_STATIC_DRAW);
+
+		// Create and compile our GLSL program from the shaders
+		programID = LoadShadersFromFile("../../../wonderland/wonderland_window.vert", "../../../wonderland/wonderland_window.frag");
+		if (programID == 0)
+		{
+			std::cerr << "Failed to load shaders." << std::endl;
+		}
+
+		// Get a handle for our "MVP" uniform
+		mvpMatrixID = glGetUniformLocation(programID, "MVP");
+		mMatrixID = glGetUniformLocation(programID, "M");             // <-- ADDED
+		lightPositionID = glGetUniformLocation(programID, "lightPosition");
+		lightIntensityID = glGetUniformLocation(programID, "lightIntensity");
+		lightSpaceMatrixID = glGetUniformLocation(programID, "lightSpaceMatrix"); // <-- ADDED
+		shadowMapSamplerID = glGetUniformLocation(programID, "shadowMap");     // <-- ADDED
+	}
+
+	void render(glm::mat4 cameraMatrix, glm::mat4 viewMatrix) {
+		glUseProgram(programID);
+
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glEnableVertexAttribArray(1);
+		glBindBuffer(GL_ARRAY_BUFFER, colorBufferID);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glEnableVertexAttribArray(2);
+		glBindBuffer(GL_ARRAY_BUFFER, normalBufferID);
+		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+
+
+		// Model Matrix (Identity since your Box vertices are already in World Space)
+		glm::mat4 modelMatrix = glm::mat4(1.0f);
+
+		// 2. Set Transformation Uniforms
+		glm::mat4 mvp = cameraMatrix * modelMatrix;
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+
+		// Pass Model Matrix for World Position calculation
+		glUniformMatrix4fv(mMatrixID, 1, GL_FALSE, &modelMatrix[0][0]);
+
+		// Calculate and pass Normal Matrix (Inverse Transpose of Model-View Matrix)
+		glm::mat4 mvMatrix = viewMatrix * modelMatrix;
+		glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(mvMatrix)));
+		GLuint normalMatrixID = glGetUniformLocation(programID, "normalMatrix");
+		glUniformMatrix3fv(normalMatrixID, 1, GL_FALSE, &normalMatrix[0][0]);
+
+
+		// 3. Set Lighting and Shadow Uniforms
+		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
+		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
+		glUniformMatrix4fv(lightSpaceMatrixID, 1, GL_FALSE, &lightSpaceMatrix[0][0]);
+
+		// Pass Far Plane for linearizing depth
+		GLuint farPlaneID = glGetUniformLocation(programID, "farPlane");
+		glUniform1f(farPlaneID, depthFar);
+
+		// 4. Bind Shadow Map Texture
+		glActiveTexture(GL_TEXTURE1); // Use Texture Unit 1
+		glBindTexture(GL_TEXTURE_2D, depthMapTexture);
+		glUniform1i(shadowMapSamplerID, 1); // Tell the shader the sampler is at unit 1
+
+
+		/*
+		// Set model-view-projection matrix
+		glm::mat4 mvp = cameraMatrix;
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+
+		// Set light data 
+		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
+		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
+		*/
+
+		// Draw the box
+		glDrawElements(
+			GL_TRIANGLES,      // mode
+			30,    			   // number of indices
+			GL_UNSIGNED_INT,   // type
+			(void*)0           // element array buffer offset
+		);
+
+		glDisableVertexAttribArray(0);
+		glDisableVertexAttribArray(1);
+		glDisableVertexAttribArray(2);
+	}
+
+	// Shadow mapping
+	void renderDepth(const glm::mat4& lightSpaceMatrix) {
+		glUseProgram(depthProgramID);
+		glBindVertexArray(vertexArrayID); // Ensure VAO is bound
+
+		// Model matrix for depth transformation (identity if box is stationary at origin)
+		glm::mat4 modelMatrix = glm::mat4(1.0f);
+
+		// Combine Model and Light Space Matrices
+		glm::mat4 mvp = lightSpaceMatrix * modelMatrix;
+
+		// Assuming the depth shader uses a uniform named 'lightSpaceMatrix' for the final MVP
+		GLuint mvpDepthID = glGetUniformLocation(depthProgramID, "lightSpaceMatrix");
+		glUniformMatrix4fv(mvpDepthID, 1, GL_FALSE, &mvp[0][0]);
+
+		// You only need to enable vertex position attribute (layout 0)
+		glEnableVertexAttribArray(0);
+		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
+
+		glDrawElements(GL_TRIANGLES, 30, GL_UNSIGNED_INT, (void*)0);
+
+		glDisableVertexAttribArray(0);
+	}
+
+
+	void cleanup() {
+		glDeleteBuffers(1, &vertexBufferID);
+		glDeleteBuffers(1, &colorBufferID);
+		glDeleteBuffers(1, &indexBufferID);
+		glDeleteBuffers(1, &normalBufferID);
+		glDeleteVertexArrays(1, &vertexArrayID);
+		glDeleteProgram(programID);
+	}
+};
+
+
+
+
 
 // ------------------------------------------------------
 // ------------------------------------------------------
@@ -484,6 +892,51 @@ int main(void)
 	}
 
 
+	// ------------------- SHADOW MAPPING SETUP -------------------
+
+// 1. Load Depth Program (You need to create these shader files!)
+	depthProgramID = LoadShadersFromFile("../../../wonderland/depth.vert", "../../../wonderland/depth.frag");
+	if (depthProgramID == 0) {
+		std::cerr << "Failed to load depth shaders." << std::endl;
+	}
+
+	// 2. Create Depth Map FBO
+	glGenFramebuffers(1, &depthMapFBO);
+
+	// 3. Create Depth Texture (Single 2D texture)
+	glGenTextures(1, &depthMapTexture);
+	glBindTexture(GL_TEXTURE_2D, depthMapTexture);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
+		shadowMapWidth, shadowMapHeight, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+
+	// Filtering and Wrapping
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+
+	// Border color to white (depth of 1.0) so out-of-bounds fragments are not shadowed
+	GLfloat borderColor[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);
+
+	// 4. Attach the depth texture to the FBO
+	glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMapTexture, 0);
+
+	// Disable color/depth rendering since we only care about depth
+	glDrawBuffer(GL_NONE);
+	glReadBuffer(GL_NONE);
+
+	// Check FBO status
+	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+		std::cerr << "Framebuffer not complete!" << std::endl;
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); // Unbind FBO
+	// -----------------------------------------------------------------
+
+
+
+
 	// Background
 	glClearColor(0.2f, 0.2f, 0.25f, 0.0f);
 
@@ -513,6 +966,8 @@ int main(void)
 		}
 	}
 
+	Box box;
+	box.initialize();
 
 	// Camera setup
 	glm::mat4 viewMatrix, projectionMatrix;
@@ -529,6 +984,69 @@ int main(void)
 		float currentFrame = static_cast<float>(glfwGetTime());
 		deltaTime = currentFrame - previousFrame;
 		previousFrame = currentFrame;
+
+		// Shadow mapping
+
+		/*
+		// Calculate Light View Matrix (looking straight down from lightPosition)
+		glm::vec3 lightTarget = lightPosition + glm::vec3(0.0f, -1.0f, 0.0f); // Look down -Y
+
+		glm::vec3 lightUp(0.0f, 0.0f, 1.0f); // just checking to see if this is the probelm
+		// Use the global lightUp (0, 0, 1) or whatever works for your coordinate system
+		glm::mat4 lightView = glm::lookAt(lightPosition, lightTarget, lightUp);
+		*/
+
+		glm::vec3 centralTarget(0.0f, 0.0f, 0.0f);
+
+		glm::vec3 lightDirection = glm::normalize(centralTarget - lightPosition);
+		glm::vec3 worldX(1.0f, 0.0f, 0.0f);
+		glm::vec3 lightRight = glm::normalize(glm::cross(lightDirection, worldX));
+		glm::vec3 robustLightUp = glm::normalize(glm::cross(lightRight, lightDirection));
+
+		glm::mat4 lightView = glm::lookAt(lightPosition, centralTarget, robustLightUp);
+
+
+		// Light Projection (Perspective for this cone approximation)
+		glm::mat4 lightProjection = glm::perspective(glm::radians(depthFoV),
+			(float)shadowMapWidth / shadowMapHeight, // Aspect ratio
+			depthNear, depthFar);
+
+		lightSpaceMatrix = lightProjection * lightView;
+
+		// ------------------- PASS 1: Generate Depth Map -------------------
+		glViewport(0, 0, shadowMapWidth, shadowMapHeight);
+		glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+		glClear(GL_DEPTH_BUFFER_BIT);
+		glCullFace(GL_FRONT); // Peter Panning prevention
+
+		glUseProgram(depthProgramID);
+		GLuint depthLightSpaceMatrixID = glGetUniformLocation(depthProgramID, "lightSpaceMatrix");
+		GLuint depthLightPositionID = glGetUniformLocation(depthProgramID, "lightPosition");
+		GLuint depthFarPlaneID = glGetUniformLocation(depthProgramID, "farPlane");
+
+		glUniformMatrix4fv(depthLightSpaceMatrixID, 1, GL_FALSE, &lightSpaceMatrix[0][0]);
+		glUniform3fv(depthLightPositionID, 1, &lightPosition[0]);
+		glUniform1f(depthFarPlaneID, depthFar);
+
+		// RENDER SCENE OBJECTS (Depth-Only Rendering)
+		// NOTE: You need to implement a renderDepth method for Ground and Box!
+		box.renderDepth(lightSpaceMatrix);
+
+		for (Ground& g : groundTiles)
+		{
+			g.renderDepth(lightSpaceMatrix, tileSize);
+		}
+
+		glCullFace(GL_BACK); // Reset culling
+		glBindFramebuffer(GL_FRAMEBUFFER, 0); // Unbind FBO
+
+		// ------------------- PASS 2: Render Scene with Shadows -------------------
+
+		// Reset viewport back to the window size
+		glViewport(0, 0, windowWidth, windowHeight);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		// ------------
+
 
 		// lookAt( where camera is, where its looking at relative to where it is, its up )
 		viewMatrix = glm::lookAt(cameraPosition, cameraPosition + cameraLookVector, cameraUp);
@@ -558,6 +1076,17 @@ int main(void)
 			g.render(vp, tileSize);
 		}
 
+		box.render(vp, viewMatrix);
+
+		// Shaow mapping
+		if (saveDepth) {
+			std::string filename = "depth_camera.png";
+			saveDepthTexture(0, filename);
+			std::cout << "Depth texture saved to " << filename << std::endl;
+			saveDepth = false;
+		}
+
+
 		// Swap buffers
 		glfwSwapBuffers(window);
 		glfwPollEvents();
@@ -567,6 +1096,11 @@ int main(void)
 
 	// Clean up
 	skybox.cleanup();
+	for (Ground& g : groundTiles)
+	{
+		g.cleanup();
+	}
+	box.cleanup();
 
 	// Close OpenGL window and terminate GLFW
 	glfwTerminate();

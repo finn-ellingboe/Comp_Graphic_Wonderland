@@ -1,9 +1,11 @@
+/*
 #include <glad/gl.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
+
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -53,7 +55,7 @@ double previousY = windowHeight / 2.0;
 float deltaTime = 0.0f;	// time between this frame and the previous frame
 float previousTime = 0.0f;	// time of the last frame
 
-// Lighting control 
+// Lighting control
 const glm::vec3 wave500(0.0f, 255.0f, 146.0f);
 const glm::vec3 wave600(255.0f, 190.0f, 0.0f);
 const glm::vec3 wave700(205.0f, 0.0f, 0.0f);
@@ -106,13 +108,13 @@ static GLuint LoadTextureTileBox(const char* texture_file_path, bool flip) {
 }
 
 struct Skybox {
-	glm::vec3 position;		// Position of the box - should be equal 
+	glm::vec3 position;		// Position of the box - should be equal
 	glm::vec3 scale;		// Size of the skybox in each axis
 
 	GLfloat vertex_buffer_data[72] = {	// Vertex definition for a canonical box
 		// if we swap position of two opposite corners, then rotate 90 degrees to right, it swaps
 		// left - all good
-		//  z,    y,   x   
+		//  z,    y,   x
 		-1.0f, -1.0f, 1.0f,		// top left
 		-1.0f, 1.0f, 1.0f,		// bottom left
 		1.0f, 1.0f, 1.0f,		// bottom right
@@ -137,7 +139,7 @@ struct Skybox {
 		1.0f, -1.0f, -1.0f,		// bottom left
 
 		// top - All good
-		-1.0f, 1.0f, -1.0f,		// 
+		-1.0f, 1.0f, -1.0f,		//
 		1.0f, 1.0f, -1.0f,
 		1.0f, 1.0f, 1.0f,		//
 		-1.0f, 1.0f, 1.0f,
@@ -232,10 +234,10 @@ struct Skybox {
 		0.75f, 0.666f,
 		0.75f, 0.334f,
 		// Top
-		0.5f, 0.667f,		// 
+		0.5f, 0.667f,		//
 		0.5f, 1.0f,			//
 		0.251f, 1.0f,		// X is higher to avoid a black line
-		0.251f, 0.667f,		// 
+		0.251f, 0.667f,		//
 		// Bottom
 		0.499f, 0.0f,
 		0.499f, 0.334f,
@@ -266,7 +268,7 @@ struct Skybox {
 		glGenVertexArrays(1, &vertexArrayID);
 		glBindVertexArray(vertexArrayID);
 
-		// Create a vertex buffer object to store the vertex data		
+		// Create a vertex buffer object to store the vertex data
 		glGenBuffers(1, &vertexBufferID);
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_buffer_data), vertex_buffer_data, GL_STATIC_DRAW);
@@ -301,7 +303,7 @@ struct Skybox {
 		// Load a texture
 		textureID = LoadTextureTileBox("../../../wonderland/Skybox_Files/Skybox_1.png", true);
 
-		// Get a handle to texture sampler 
+		// Get a handle to texture sampler
 		textureSamplerID = glGetUniformLocation(programID, "textureSampler");
 	}
 
@@ -320,7 +322,7 @@ struct Skybox {
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
 
-		// Model transform 
+		// Model transform
 		glm::mat4 modelMatrix = glm::mat4();
 
 		// Translate the box so it is always centered on the player as they move around
@@ -374,7 +376,7 @@ struct CornellBox {
 	GLfloat normal_buffer_data[60];
 	GLfloat color_buffer_data[60];
 
-	// Refer to original Cornell Box data 
+	// Refer to original Cornell Box data
 	// from https://www.graphics.cornell.edu/online/box/data.html
 
 	GLuint index_buffer_data[30] = {
@@ -417,7 +419,7 @@ struct CornellBox {
 		glGenVertexArrays(1, &vertexArrayID);
 		glBindVertexArray(vertexArrayID);
 
-		// Create a vertex buffer object to store the vertex data		
+		// Create a vertex buffer object to store the vertex data
 		glGenBuffers(1, &vertexBufferID);
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(this->vertex_buffer_data), this->vertex_buffer_data, GL_STATIC_DRAW);
@@ -427,7 +429,7 @@ struct CornellBox {
 		glBindBuffer(GL_ARRAY_BUFFER, colorBufferID);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(this->color_buffer_data), this->color_buffer_data, GL_STATIC_DRAW);
 
-		// Create a vertex buffer object to store the vertex normals		
+		// Create a vertex buffer object to store the vertex normals
 		glGenBuffers(1, &normalBufferID);
 		glBindBuffer(GL_ARRAY_BUFFER, normalBufferID);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(this->normal_buffer_data), this->normal_buffer_data, GL_STATIC_DRAW);
@@ -471,7 +473,7 @@ struct CornellBox {
 		glm::mat4 mvp = cameraMatrix;
 		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
 
-		// Set light data 
+		// Set light data
 		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
 		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
 
@@ -523,7 +525,7 @@ struct Heightmap
 		glGenVertexArrays(1, &vertexArrayID);
 		glBindVertexArray(vertexArrayID);
 
-		// Create a vertex buffer object to store the vertex data	
+		// Create a vertex buffer object to store the vertex data
 		glGenBuffers(1, &vertexBufferID);
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
 		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(glm::vec3), vertices.data(), GL_DYNAMIC_DRAW);
@@ -558,12 +560,11 @@ struct Heightmap
 		//Loading the texture
 		textureID = LoadTextureTileBox("../../../wonderland/Ground_Textures/IMGP1394.jpg", false);
 
-		// Get a handle to texture sampler 
+		// Get a handle to texture sampler
 		textureSamplerID = glGetUniformLocation(programID, "terrainTextureSampler");
 	}
 
-	/* Generate vertices and indices for the heightmap
- */
+	// Generate vertices and indices for the heightmap
 	void initialiseMap()
 	{
 		vertices.resize(TOTAL);
@@ -572,7 +573,7 @@ struct Heightmap
 		GLfloat step = MAP_SIZE / (MAP_NUM_VERTICES - 1);
 		GLfloat x = -MAP_SIZE / 2;	//0,0 should be its center
 		GLfloat z = -MAP_SIZE / 2;
-		/* Create a flat grid */
+		// Create a flat grid
 		int k = 0;
 		for (int i = 0; i < MAP_NUM_VERTICES; ++i)
 		{
@@ -618,11 +619,6 @@ struct Heightmap
 
 	void updateMap()
 	{
-		/* center of the circle */
-		/*
-		float center_x = (MAP_SIZE * rand()) / RAND_MAX;
-		float center_z = (MAP_SIZE * rand()) / RAND_MAX;
-		*/
 		float center_x = ((float)rand() / RAND_MAX - 0.5f) * MAP_SIZE;
 		float center_z = ((float)rand() / RAND_MAX - 0.5f) * MAP_SIZE;
 		float circle_size = (MAX_CIRCLE_SIZE * rand()) / RAND_MAX;
@@ -634,7 +630,7 @@ struct Heightmap
 		for (auto& v : vertices) // For all vertices
 		{
 			GLfloat dx = center_x - v.x;	// x distance
-			GLfloat dz = center_z - v.z;	// y distance from 
+			GLfloat dz = center_z - v.z;	// y distance from
 			GLfloat pd = (sqrt((dx * dx) + (dz * dz))) / circle_size; // it recommends removing the 2 *
 			if (fabs(pd) <= 1.0f)
 			{
@@ -658,14 +654,14 @@ struct Heightmap
 		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferID);
 		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, 0);
 
-		
+
 		glEnableVertexAttribArray(1);	// Think thi needs to change to 1 - but some other stuff also needs to change
 		glBindBuffer(GL_ARRAY_BUFFER, uvBufferID);
 		glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, 0);
-		
+
 
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferID);
-		
+
 		// TODO: make the size the same as the skybox, and center it on the player
 		glm::mat4 modelMatrix = glm::mat4();
 
@@ -771,7 +767,7 @@ struct Lampost {
 			return;
 		}
 
-		// Prepare buffers for rendering 
+		// Prepare buffers for rendering
 		primitiveObjects = bindModel(model);
 
 		// Create and compile our GLSL program from the shaders
@@ -798,8 +794,8 @@ struct Lampost {
 			int target = bufferView.target;
 
 			if (bufferView.target == 0) {
-				// The bufferView with target == 0 in our model refers to 
-				// the skinning weights, for 25 joints, each 4x4 matrix (16 floats), totaling to 400 floats or 1600 bytes. 
+				// The bufferView with target == 0 in our model refers to
+				// the skinning weights, for 25 joints, each 4x4 matrix (16 floats), totaling to 400 floats or 1600 bytes.
 				// So it is considered safe to skip the warning.
 				//std::cout << "WARN: bufferView.target is zero" << std::endl;
 				continue;
@@ -815,7 +811,7 @@ struct Lampost {
 			vbos[i] = vbo;
 		}
 
-		// Each mesh can contain several primitives (or parts), each we need to 
+		// Each mesh can contain several primitives (or parts), each we need to
 		// bind to an OpenGL vertex array object
 		for (size_t i = 0; i < mesh.primitives.size(); ++i) {
 
@@ -913,18 +909,7 @@ struct Lampost {
 			glBindVertexArray(0);
 		}
 	}
-	/*
-	void drawModelNodes(const std::vector<PrimitiveObject>& primitiveObjects,
-		tinygltf::Model& model, tinygltf::Node& node) {
-		// Draw the mesh at the node, and recursively do so for children nodes
-		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
-			drawMesh(primitiveObjects, model, model.meshes[node.mesh]);
-		}
-		for (size_t i = 0; i < node.children.size(); i++) {
-			drawModelNodes(primitiveObjects, model, model.nodes[node.children[i]]);
-		}
-	}
-	*/
+
 	void drawModelNodes(const std::vector<PrimitiveObject>& primitiveObjects,
 		tinygltf::Model& model, tinygltf::Node& node, glm::mat4 parentTransform,
 		glm::mat4 cameraMatrix) {
@@ -942,16 +927,6 @@ struct Lampost {
 		}
 	}
 
-	/*
-	void drawModel(const std::vector<PrimitiveObject>& primitiveObjects,
-		tinygltf::Model& model) {
-		// Draw all nodes
-		const tinygltf::Scene& scene = model.scenes[model.defaultScene];
-		for (size_t i = 0; i < scene.nodes.size(); ++i) {
-			drawModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]]);
-		}
-	}
-	*/
 	void drawModel(const std::vector<PrimitiveObject>& primitiveObjects,
 		tinygltf::Model& model, glm::mat4 cameraMatrix,
 		glm::mat4 worldTransform) {
@@ -974,16 +949,15 @@ struct Lampost {
 		modelMatrix = glm::scale(modelMatrix, glm::vec3(200.0f));
 
 		// Set camera
-		/*
-		glm::mat4 mvp = cameraMatrix;
-		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
-		*/
+		// glm::mat4 mvp = cameraMatrix;
+		// glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+
 
 		// setting just a generic color for now
-		glm::vec3 objectColor(1.0f, 0.5f, 0.0f); 
+		glm::vec3 objectColor(1.0f, 0.5f, 0.0f);
 		glUniform3fv(glGetUniformLocation(programID, "color"), 1, &objectColor[0]);
 
-		// Set light data 
+		// Set light data
 		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
 		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
 
